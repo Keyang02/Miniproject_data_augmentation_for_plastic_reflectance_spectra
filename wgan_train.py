@@ -5,8 +5,8 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
-from dcgan import Discriminator, Generator, weights_init
-from preprocessing import Dataset
+from wgan import Discriminator, Generator, weights_init
+from preprocessing import Dataset_csv
 
 
 n_critic = 5
@@ -17,11 +17,11 @@ batch_size = 8
 nz = 100  # length of noise
 ngpu = 0
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+print("The operating device is " + str(device))
 
 def main():
     # load training data
-    trainset = Dataset('./data/brilliant_blue')
+    trainset = Dataset_csv("PlasticDataset/interpolated_spectra_clean.csv")
 
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=batch_size, shuffle=True
