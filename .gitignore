@@ -4,3 +4,7 @@
 /__pycache__
 *[1234567890].png
 /models
+/gif
+/img
+/loss
+/PlasticDataset
