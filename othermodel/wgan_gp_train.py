@@ -4,8 +4,8 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import numpy as np
 import matplotlib.pyplot as plt
-from dcgan import Discriminator, Generator, weights_init
-from preprocessing import Dataset_txt
+from wgan import Discriminator, Generator, weights_init
+from preprocessing import Dataset_csv
 import torch.autograd as autograd
 
 
@@ -23,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def main():
     # load training data
-    trainset = Dataset_txt('./data/brilliant_blue')
+    trainset = Dataset_csv("PlasticDataset/interpolated_spectra_clean.csv")
 
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=batch_size, shuffle=True
@@ -40,10 +40,10 @@ def main():
     fixed_noise = torch.randn(16, nz, 1, device=device)
 
     # optimizers
-    # optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, beta2))
-    # optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, beta2))
-    optimizerD = optim.RMSprop(netD.parameters(), lr=lr)
-    optimizerG = optim.RMSprop(netG.parameters(), lr=lr)
+    optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, beta2))
+    optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(beta1, beta2))
+    # optimizerD = optim.RMSprop(netD.parameters(), lr=lr)
+    # optimizerG = optim.RMSprop(netG.parameters(), lr=lr)
 
     for epoch in range(epoch_num):
         for step, (data, _) in enumerate(trainloader):
@@ -56,11 +56,11 @@ def main():
             fake = netG(noise)
 
             # gradient penalty
-            eps = torch.Tensor(b_size, 1, 1).uniform_(0, 1)
-            x_p = eps * data + (1 - eps) * fake
-            grad = autograd.grad(netD(x_p).mean(), x_p, create_graph=True, retain_graph=True)[0].view(b_size, -1)
-            grad_norm = torch.norm(grad, 2, 1)
-            grad_penalty = p_coeff * torch.pow(grad_norm - 1, 2)
+            # eps = torch.Tensor(b_size, 1, 1).uniform_(0, 1)
+            # x_p = eps * data + (1 - eps) * fake
+            # grad = autograd.grad(netD(x_p).mean(), x_p, create_graph=True, retain_graph=True)[0].view(b_size, -1)
+            # grad_norm = torch.norm(grad, 2, 1)
+            # grad_penalty = p_coeff * torch.pow(grad_norm - 1, 2)
 
             loss_D = torch.mean(netD(fake) - netD(real_cpu))
             loss_D.backward()

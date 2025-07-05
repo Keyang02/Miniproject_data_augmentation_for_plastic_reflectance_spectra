@@ -8,25 +8,24 @@ import pandas as pd
 class Dataset_csv(Dataset):
     def __init__(self, root):
         self.dataset = self.build_dataset(root)
-        self.length = self.dataset.shape[1]
-        self.minmax_normalize()
+        # self.minmax_normalize()
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        step = self.dataset[idx, :]
-        step = torch.unsqueeze(step, 0)
+        datapoint = self.dataset[idx, :]
+        datapoint = torch.unsqueeze(datapoint, 0)
         # target = self.label[idx]
-        target = 0  # only one class
-        return step, target
+        label = 0  # only one class
+        return datapoint, label
 
     def build_dataset(self, root):
         '''get dataset of signal'''
         df = pd.read_csv(root)
-        df_oneclass = df[df['Material'] == 1.0]
-        df_oneclass = df_oneclass.drop(columns=['Material'])
-        dataset = torch.tensor(df_oneclass.values, dtype=torch.float32)
+        # df_oneclass = df[df['Material'] == 2.0]
+        # df_oneclass = df_oneclass.drop(columns=['Material'])
+        dataset = torch.tensor(df.values, dtype=torch.float32)
         return dataset
 
     def minmax_normalize(self):
