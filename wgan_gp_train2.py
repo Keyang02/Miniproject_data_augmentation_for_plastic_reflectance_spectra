@@ -50,7 +50,7 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_csv("PlasticDataset/merged_dataset.csv")
+    trainset = Dataset_csv("PlasticDataset/nolabel/merged_dataset.csv")
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=batch_size, shuffle=True, drop_last=True
     )
