@@ -1,31 +1,35 @@
 import os
+import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.autograd as autograd
-import numpy as np
-import matplotlib.pyplot as plt
-from conditional_WGAN_net import CondGen1D, CondCritic1D, init_weights, CondGen1D_ConvT
+
 from loaddataset import Dataset_csv 
 from visualisation import plot_realvsfake, gifplot, plot_loss
 from material_dict import material_labels
+
+from conditional_WGAN_net import CondCritic1D, init_weights
+from conditional_WGAN_net import CondGen1D_ConvT as CondGen1D
 
 # hyperparameters
 beta1 = 0.0         # beta1 for Adam optimizer
 beta2 = 0.9         # beta2 for Adam optimizer
 lr = 1e-4           # learning rate for Adam optimizer
 p_coeff = 10        # gradient penalty coefficient
-n_critic = 5        # D updates per G update
+n_critic = 3        # D updates per G update
 nz = 100            # noise dim
 
-epoch_num = 200
-batch_size = 20
+epoch_num = 64
+batch_size = 30
 
 imgname = 'wgan_gp_epoch_{epoch}.png'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def compute_1side_gradient_penalty(D, real_samples, fake_samples, label):
+def compute_gradient_penalty(D, real_samples, fake_samples, label, oneside = False):
     """Calculates the gradient penalty loss for WGAN GP"""
     batch_size = real_samples.size(0)
     # sample interpolation coefficients in [0,1]
@@ -47,8 +51,9 @@ def compute_1side_gradient_penalty(D, real_samples, fake_samples, label):
     grad_norm = grads.norm(2, dim=1)
     grad_deviation = grad_norm - 1
 
-    # If grad_norm is less than 1, the penalty is zero.
-    grad_deviation = torch.where(grad_deviation < 0, torch.zeros_like(grad_deviation), grad_deviation)
+    if oneside:
+        # If grad_norm is less than 1, the penalty is zero.
+        grad_deviation = torch.where(grad_deviation < 0, torch.zeros_like(grad_deviation), grad_deviation)
 
     penalty = p_coeff * (grad_deviation ** 2).mean()
     return penalty
@@ -74,14 +79,14 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_csv("PlasticDataset/labeled/merged_dataset_withlabel.csv")
+    trainset = Dataset_csv("PlasticDataset/labeled/merged_dataset_withlabel.csv", print_info=True)
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=batch_size, shuffle=True, drop_last=True
     )
 
     # initialize networks
     netD = CondCritic1D().to(device)
-    netG = CondGen1D_ConvT(nz).to(device)
+    netG = CondGen1D(nz).to(device)
     netD.apply(init_weights)
     netG.apply(init_weights)
 
@@ -115,7 +120,7 @@ def main():
                 d_fake = netD(fake, label).mean()
 
                 # gradient penalty
-                gp = compute_1side_gradient_penalty(netD, real, fake, label)
+                gp = compute_gradient_penalty(netD, real, fake, label)
 
                 # WGAN-GP loss for D
                 loss_D = d_fake - d_real + gp
@@ -138,15 +143,14 @@ def main():
                 print(f"[Epoch {epoch}/{epoch_num}] [Step {i}/{len(trainloader)}] "
                       f"Loss_D: {loss_D.item():.4f}  Loss_G: {loss_G.item():.4f}")
                 
-                # save losses
-                loss_D_var.append(loss_D.item())
-                loss_G_var.append(loss_G.item())    
+        # save losses
+        loss_D_var.append(loss_D.item())
+        loss_G_var.append(loss_G.item())    
 
         # save intermediate plots
         with torch.no_grad():
             fake = netG(fixed_noise, fixed_labels).cpu()
             intermediate_plot(fake, fixed_labels, imgname.format(epoch=epoch))
-
 
     # save trained networks
     torch.save(netD.state_dict(), f'nets/netD_epoch_{epoch_num}.pth')
