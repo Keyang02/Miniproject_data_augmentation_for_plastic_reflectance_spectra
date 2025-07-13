@@ -7,16 +7,17 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.autograd as autograd
 
-from loaddataset import Dataset_csv 
+from loaddataset import Dataset_addnoise
 from visualisation import plot_realvsfake, gifplot, plot_loss
 from material_dict import material_labels
 
-from conditional_WGAN_net import CondCritic1D, init_weights
-from conditional_WGAN_net import CondGen1D_ConvT as CondGen1D
+from conditional_WGAN_net import init_weights
+from conditional_WGAN_net import CondCritic1D_2labels as CondCritic1D
+from conditional_WGAN_net import CondGen1D_ConvT_2labels as CondGen1D
 
 # hyperparameters
-beta1 = 0.9         # beta1 for Adam optimizer
-beta2 = 0.999       # beta2 for Adam optimizer
+beta1 = 0.0        # beta1 for Adam optimizer
+beta2 = 0.9        # beta2 for Adam optimizer
 lr = 1e-4           # learning rate for Adam optimizer
 p_coeff = 10        # gradient penalty coefficient
 n_critic = 3        # D updates per G update
@@ -29,14 +30,14 @@ imgname = 'wgan_gp_epoch_{epoch}.png'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def compute_gradient_penalty(D, real_samples, fake_samples, label, oneside = False):
+def compute_gradient_penalty(D, real_samples, fake_samples, material_label, noise_label, oneside = False):
     """Calculates the gradient penalty loss for WGAN GP"""
     batch_size = real_samples.size(0)
     # sample interpolation coefficients in [0,1]
     alpha = torch.rand(batch_size, 1, 1, device=device)
     # create interpolations
     interpolates = (alpha * real_samples + (1 - alpha) * fake_samples).requires_grad_(True)
-    d_interpolates = D(interpolates, label)
+    d_interpolates = D(interpolates, material_label, noise_label)
     # ones for grad_outputs
     ones = torch.ones(d_interpolates.size(), device=device)
     # compute gradients wrt interpolates
@@ -79,7 +80,7 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_csv("PlasticDataset/labeled/merged_dataset_withlabel.csv", print_info=True)
+    trainset = Dataset_addnoise("PlasticDataset/labeled/merged_dataset_withlabel.csv", print_info=True)
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=batch_size, shuffle=True, drop_last=True
     )
@@ -92,8 +93,9 @@ def main():
 
     # fixed noise for visualisation
     fixed_noise = torch.randn(28, nz, device=device)
-    fixed_labels = torch.tensor(np.array([1, 2, 3, 4, 5, 6, 0]), device=device)
-    fixed_labels = fixed_labels.repeat(4)  # repeat to match batch size of 28
+    fixed_material_labels = torch.tensor(np.array([1, 2, 3, 4, 5, 6, 0]), device=device)
+    fixed_material_labels = fixed_material_labels.repeat(4)  # repeat to match batch size of 28
+    fixed_noise_labels = torch.tensor(np.repeat([1, 2, 3, 4], 7), device=device)
 
     # optimizers (Adam for WGAN-GP)
     optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(beta1, beta2))
@@ -102,9 +104,10 @@ def main():
     loss_D_var = []  # to store D loss
     loss_G_var = []  # to store G loss
     for epoch in range(1, epoch_num + 1):
-        for i, (real, label) in enumerate(trainloader, start=1):
+        for i, (real, material_label, noise_label) in enumerate(trainloader, start=1):
             real = real.to(device)
-            label = label.to(device)
+            material_label = material_label.to(device)
+            noise_label = noise_label.to(device)
 
             # ---------------------
             #  1) Train Discriminator
@@ -113,28 +116,32 @@ def main():
                 netD.zero_grad()
                 # sample noise and generate fake
                 noise = torch.randn(batch_size, nz, device=device)
-                fake = netG(noise, label).detach()  # detach to avoid G gradients
+                fake = netG(noise, material_label, noise_label).detach()  # detach to avoid G gradients
 
                 # real scores and fake scores
-                d_real = netD(real, label).mean()
-                d_fake = netD(fake, label).mean()
+                d_real = netD(real, material_label, noise_label).mean()
+                d_fake = netD(fake, material_label, noise_label).mean()
 
                 # gradient penalty
-                gp = compute_gradient_penalty(netD, real, fake, label)
+                gp = compute_gradient_penalty(netD, real, fake, material_label, noise_label)
 
                 # WGAN-GP loss for D
                 loss_D = d_fake - d_real + gp
                 loss_D.backward()
                 optimizerD.step()
 
+                if torch.isnan(loss_D).any() or torch.isinf(loss_D).any():
+                    print("Discriminator loss is NaN or Inf, stopping training.")
+                    return
+
             # -----------------
             #  2) Train Generator
             # -----------------
             netG.zero_grad()
             noise = torch.randn(batch_size, nz, device=device)
-            fake = netG(noise, label)
+            fake = netG(noise, material_label, noise_label)
             # G tries to make D think outputs are real => minimize −E[D(fake)]
-            loss_G = -netD(fake, label).mean()
+            loss_G = -netD(fake, material_label, noise_label).mean()
             loss_G.backward()
             optimizerG.step()
 
@@ -149,8 +156,8 @@ def main():
 
         # save intermediate plots
         with torch.no_grad():
-            fake = netG(fixed_noise, fixed_labels).cpu()
-            intermediate_plot(fake, fixed_labels, imgname.format(epoch=epoch))
+            fake = netG(fixed_noise, fixed_material_labels, fixed_noise_labels).cpu()
+            intermediate_plot(fake, fixed_material_labels, imgname.format(epoch=epoch))
 
     # save trained networks
     torch.save(netD.state_dict(), f'nets/netD_epoch_{epoch_num}.pth')

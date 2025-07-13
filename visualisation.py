@@ -3,11 +3,11 @@ import numpy as np
 import imageio
 import os
 import torch
+
 from wgan import Generator
-from preprocessing import Dataset_csv
-from material_dict import material_labels
-from conditional_WGAN_net import CondGen1D_ConvT as CondGen1D
-from loaddataset import Dataset_csv
+from material_dict import material_labels as material_dict
+from conditional_WGAN_net import CondGen1D_ConvT_2labels as CondGen1D
+from loaddataset import Dataset_addnoise, Dataset_csv
 
 def gifplot(filename, keyword = 'wgan', root='/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal',isdelete=True):
     os.makedirs('gif', exist_ok=True)
@@ -88,7 +88,7 @@ def plot_realvsfake_cond(netG, device, label, batchsize=8, nz=100,
     fake = netG(noise, labels).detach().numpy()
 
     f, ax = plt.subplots(4, 4, figsize=(10, 6))
-    f.suptitle(f'Real vs Fake Signals for {material_labels[label]} Reflectance Spectra')
+    f.suptitle(f'Real vs Fake Signals for {material_dict[label]} Reflectance Spectra')
     for i in range(4):
         for j in range(4):
             if i * 4 + j < 8:
@@ -100,7 +100,7 @@ def plot_realvsfake_cond(netG, device, label, batchsize=8, nz=100,
                 ax[i][j].legend('fake')
             ax[i][j].set_xticks(())
             ax[i][j].set_yticks((0,1))
-    plt.savefig(os.path.join(root, f'img/real_vs_fake_{material_labels[label]}.png'))
+    plt.savefig(os.path.join(root, f'img/real_vs_fake_{material_dict[label]}.png'))
     plt.close(f)
 
 def plot_realvsfake_cond_all(netG, device, batchsize=2, nz=100,
@@ -130,7 +130,69 @@ def plot_realvsfake_cond_all(netG, device, batchsize=2, nz=100,
                 ax[rowidx][colidx].set_xticks(())
                 ax[rowidx][colidx].set_yticks((0,1))
                 if rowidx < 1:
-                    ax[rowidx][colidx].set_title(material_labels[label_list[colidx].item()])
+                    ax[rowidx][colidx].set_title(material_dict[label_list[colidx].item()])
+            else:
+                idx = rowidx + colidx * batchsize - batchsize
+                ax[rowidx][colidx].plot(fake[idx].flatten(), label='Fake', color='red')
+                ax[rowidx][colidx].legend('fake')
+                ax[rowidx][colidx].set_xticks(())
+                ax[rowidx][colidx].set_yticks((0,1))
+    plt.savefig(os.path.join(root, 'img/real_vs_fake_all_materials.png'))
+    plt.close(f)
+
+def sample_multiple_labels(device, material_label, batchsize, 
+                     dataset_path='PlasticDataset/labeled/merged_dataset_withlabel.csv'):
+    real_dataset = Dataset_addnoise(dataset_path)
+    dataloader = torch.utils.data.DataLoader(real_dataset, batch_size=1, shuffle=True)
+    loader_iter = iter(dataloader)
+
+    real = torch.tensor([]).to(device)
+    material_labels = torch.tensor([]).to(device)
+    noise_labels = torch.tensor([]).to(device)
+    while len(real) < batchsize:
+        try:
+            data_try, label_try, noise_try = next(loader_iter)
+        except StopIteration:
+            loader_iter = iter(dataloader)
+        if label_try.item() == material_label:
+            real = torch.cat((real, data_try.to(device)), dim=0)
+            material_labels = torch.cat((material_labels, label_try.to(device)), dim=0)
+            noise_labels = torch.cat((noise_labels, noise_try.to(device)), dim=0)
+    material_labels = material_labels.to(torch.int)
+    noise_labels = noise_labels.to(torch.int)
+    return real, material_labels, noise_labels
+
+def plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100,
+                             label_list = [1, 2, 3, 4, 5, 6, 0],
+                             root='/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal'):
+    label_length = len(label_list)
+    label_list = torch.tensor(label_list, dtype=torch.int).to(device)
+    real = torch.tensor([]).to(device)
+    material_labels = torch.tensor([]).to(device)
+    noise_labels = torch.tensor([]).to(device)
+    for label in label_list:
+        r, m, n = sample_multiple_labels(device, label, batchsize=batchsize)
+        real = torch.cat((real, r), dim=0)
+        material_labels = torch.cat((material_labels, m), dim=0)
+        noise_labels = torch.cat((noise_labels, n), dim=0)
+    real = real.detach().numpy()
+    material_labels = material_labels.to(torch.int)
+    noise_labels = noise_labels.to(torch.int)
+
+    noise = torch.randn(batchsize * label_length, nz, device=device)
+    fake = netG(noise, material_labels, noise_labels).detach().numpy()
+
+    f, ax = plt.subplots(4, label_length, figsize=(14, 8), sharex=True, sharey=True)
+    for colidx in range(label_length):
+        for rowidx in range(2 * batchsize):
+            if rowidx < batchsize:
+                idx = rowidx + colidx * batchsize
+                ax[rowidx][colidx].plot(real[idx].flatten(), label='Real', color='blue')
+                ax[rowidx][colidx].legend('real')
+                ax[rowidx][colidx].set_xticks(())
+                ax[rowidx][colidx].set_yticks((0,1))
+                if rowidx < 1:
+                    ax[rowidx][colidx].set_title(material_dict[label_list[colidx].item()])
             else:
                 idx = rowidx + colidx * batchsize - batchsize
                 ax[rowidx][colidx].plot(fake[idx].flatten(), label='Fake', color='red')
@@ -141,7 +203,7 @@ def plot_realvsfake_cond_all(netG, device, batchsize=2, nz=100,
     plt.close(f)
 
 
-if __name__ == '__main__':
+def visualise_condWGAN_1label():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     root = '/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal'
 
@@ -158,21 +220,33 @@ if __name__ == '__main__':
 
     for m in range(7):
         plot_realvsfake_cond(netG, device, m, batchsize=8, nz=100, root=root)
-        print(f'Real vs Fake plot saved as real_vs_fake_{material_labels[m]}.png')
+        print(f'Real vs Fake plot saved as real_vs_fake_{material_dict[m]}.png')
 
     plot_realvsfake_cond_all(netG, device, batchsize=2, nz=100, root=root)
     print('Real vs Fake plot for all materials saved as real_vs_fake_all_materials.png')
 
+def visualise_condWGAN_2labels():
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    root = '/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal'
 
-    # trainset = Dataset_csv("PlasticDataset/nolabel/merged_dataset.csv")
+    gifplot('wgan_gp.gif', root = root)
+    print('GIF saved as wgan_gp.gif')
 
-    # trainloader = torch.utils.data.DataLoader(
-    #     trainset, batch_size=8, shuffle=True
-    #     )
+    loss_D = np.load(os.path.join(root, 'loss/wgan_gp_loss_D.npy'))
+    loss_G = np.load(os.path.join(root, 'loss/wgan_gp_loss_G.npy'))
+    plot_loss(loss_D, loss_G, root = root)
+    print('Loss plot saved as wgan_loss_plot.png')
 
-    # netG = Generator(100)
-    # netG.load_state_dict(torch.load(os.path.join(root, 'nets/wgan_gp_netG.pth')))
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    netG = CondGen1D(100).to(device)
+    netG.load_state_dict(torch.load(os.path.join(root, 'nets/netG_epoch_100.pth')))
 
-    # plot_realvsfake(trainloader, netG, device=device, root = root)
-    # print('Real vs Fake plot saved as real_vs_fake.png')
+    # for m in range(7):
+    #     plot_realvsfake_cond(netG, device, m, batchsize=8, nz=100, root=root)
+    #     print(f'Real vs Fake plot saved as real_vs_fake_{material_labels[m]}.png')
+
+    plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100, root=root)
+    print('Real vs Fake plot for all materials saved as real_vs_fake_all_materials.png')
+
+if __name__ == '__main__':
+    visualise_condWGAN_2labels()
+    print('Visualisation completed.')

@@ -17,5 +17,7 @@ noise_labels = {
 
 color_labels = {
     1 : 'blue',
-    2 : 'orange'
+    2 : 'orange',
+    3 : 'pink',
+    4 : 'yellow'
 }
