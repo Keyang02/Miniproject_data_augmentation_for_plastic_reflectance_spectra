@@ -32,8 +32,11 @@ class ConvBlock(nn.Module):
     def forward(self, x): return self.block(x)
 
 class CondCritic1D(nn.Module):
-    def __init__(self, n_classes=7, embed_dim=8,
-                 base_c=64, input_len=1301):
+    def __init__(self, 
+                 n_classes: int = 7, 
+                 embed_dim: int = 8,
+                 base_c: int = 64, 
+                 input_len: int = 1301):
         super().__init__()
         self.embed = nn.Embedding(n_classes, embed_dim)
 
@@ -64,11 +67,18 @@ class CondCritic1D(nn.Module):
         return h.view(h.size(0), -1)                                     # (B,1) Wasserstein score
     
 class CondCritic1D_2labels(nn.Module):
-    def __init__(self, n_classes=7, embed_dim1=8, embed_dim2=4,
-                 base_c=64, input_len=1301):
+    def __init__(self, 
+                 embed_classes1: int = 11, 
+                 embed_dim1: int = 16, 
+                 embed_classes2: int = 4,
+                 embed_dim2: int = 8,
+                 base_c: int = 64, 
+                 input_len: int = 1301,
+                 isCR: bool = False):
         super().__init__()
-        self.embed1 = nn.Embedding(n_classes, embed_dim1)
-        self.embed2 = nn.Embedding(n_classes, embed_dim2)
+        self.embed1 = nn.Embedding(embed_classes1, embed_dim1)
+        self.embed2 = nn.Embedding(embed_classes2, embed_dim2)
+        self.isCR = isCR
 
         k = input_len + embed_dim1 + embed_dim2
         for _ in range(4):
@@ -80,22 +90,24 @@ class CondCritic1D_2labels(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             ConvBlock(base_c, base_c*2),                    # L:654 -> 327   C:64 -> 128
             ConvBlock(base_c*2, base_c*4),                  # L:327 -> 163   C:128 -> 256
-            ConvBlock(base_c*4, base_c*8),                  # L:163 -> 81    C:256 -> 512
+            ConvBlock(base_c*4, base_c*8)                  # L:163 -> 81    C:256 -> 512
+        )  
+        self.out = nn.Sequential(
             nn.Dropout(0.1),                                # L:81 -> 81
             nn.Conv1d(base_c * 8, 1, kernel_size=kernel_size_last, stride=1, padding=0, bias=False)  # L:81 -> 1   C:512 -> 1
         )
-        # flat_features = base_c * 8 * kernel_size_last  # 512 * 83
-        # self.out = spectral_norm(nn.Linear(flat_features, 1))
-        
 
     def forward(self, x, y1, y2):
         # x: (B,1,1301)   y: (B,)
         y1_emb = self.embed1(y1).unsqueeze(1)                    # (B,1,embed_dim)
         y2_emb = self.embed2(y2).unsqueeze(1)                    # (B,1,embed_dim)
-        h = torch.cat([x, y1_emb, y2_emb], 2)                     # (B,1,1301+embed_dim*2)
-        h = self.blocks(h)
-        # h = h.view(h.size(0), -1)
-        return h.view(h.size(0), -1)                                     # (B,1) Wasserstein score
+        v = torch.cat([x, y1_emb, y2_emb], 2)                     # (B,1,1301+embed_dim*2)
+        v = self.blocks(v)
+        h = self.out(v)
+        if self.isCR:
+            return h.view(h.size(0), -1), v.view(v.size(0), -1)  # (B,1) Wasserstein score, (B,512*83) features
+        else:  
+            return h.view(h.size(0), -1)                                     # (B,1) Wasserstein score
 
 class UpsampleBlock(nn.Module):
     """nearest-neighbor ↑2  +  Conv1d (padding='same')"""
@@ -191,17 +203,18 @@ class CondGen1D_ConvT_2labels(nn.Module):
 
     def __init__(self,
                  latent_dim: int = 100,
-                 n_classes: int = 7,
-                 embed_dim1: int = 8,
-                 embed_dim2: int = 4,
+                 embed_classes1: int = 11,
+                 embed_dim1: int = 16,
+                 embed_classes2: int = 4,
+                 embed_dim2: int = 8,
                  base_c: int = 256,
                  target_len: int = 1301):
         super().__init__()
         self.target_len = target_len  # kept for reference
 
         # label embedding + fully‑connected projection to (B, base_c, 81)
-        self.embed1 = nn.Embedding(n_classes, embed_dim1)
-        self.embed2 = nn.Embedding(n_classes, embed_dim2)
+        self.embed1 = nn.Embedding(embed_classes1, embed_dim1)
+        self.embed2 = nn.Embedding(embed_classes2, embed_dim2)
         self.fc = nn.Linear(latent_dim + embed_dim1 + embed_dim2, base_c * 81)
 
         # sequence of deconvolution blocks: 81 -> 1296

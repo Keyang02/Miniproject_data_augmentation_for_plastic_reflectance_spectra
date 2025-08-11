@@ -1,0 +1,18 @@
+name: spectrum_gen
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - pytorch
+  - scikit-learn
+  - torchvision
+  - torchaudio
+  - openpyxl
+  - pytorch-cuda=12.4
+  - pandas
+  - matplotlib
+  - imageio
+  - seaborn
+  - pip
+  - pip:
+    - pytorch-fid=0.3.0

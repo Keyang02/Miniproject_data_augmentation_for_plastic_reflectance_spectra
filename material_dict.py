@@ -1,11 +1,15 @@
 material_labels = {
-    1 :'HDPE',
-    2 :'PP',
-    3 :'XPS',
-    4 :'PET',
-    5 :'PVC',
-    6 :'PA6',
-    0 :'BLANK'
+    0 : "Others",
+    1 : "HDPE",
+    2 : "PP",
+    3 : "PS",
+    4 : "PET",
+    5 : "PVC",
+    6 : "PA6",
+    7 : "PE",
+    8 : "LDPE",
+    9 : "XPS",
+    10: "PC"
 }
 
 noise_labels = {

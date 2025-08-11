@@ -10,3 +10,13 @@
 /PlasticDataset
 /nets
 /synthetic_data
+/log
+/vs_img
+/img
+/run_all.sh
+/test_all.sh
+/conditional_WGAN_ICR_train.py
+/wgan_gp_train2.py
+/wgan.py
+/conditional_WGAN_train.py
+/README_old.md
