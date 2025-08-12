@@ -188,12 +188,12 @@ def plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100,
         real = torch.cat((real, r), dim=0)
         material_labels = torch.cat((material_labels, m), dim=0)
         noise_labels = torch.cat((noise_labels, n), dim=0)
-    real = real.detach().numpy()
+    real = real.detach().cpu().numpy()
     material_labels = material_labels.to(torch.int)
     noise_labels = noise_labels.to(torch.int)
 
     noise = torch.randn(batchsize * label_length, nz, device=device)
-    fake = netG(noise, material_labels, noise_labels).detach().numpy()
+    fake = netG(noise, material_labels, noise_labels).detach().cpu().numpy()
 
     f, ax = plt.subplots(4, label_length, figsize=(14, 8), sharex=True, sharey=True)
     for colidx in range(label_length):
@@ -241,7 +241,6 @@ def plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100,
 
 def visualise_condWGAN_2labels():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    root = '/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal'
 
     gifplot('wgan_gp.gif')
     print('GIF saved as wgan_gp.gif')

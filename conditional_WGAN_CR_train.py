@@ -23,13 +23,13 @@ parser = argparse.ArgumentParser(description='Hyperparameters for Conditional WG
 parser.add_argument('--beta1', type=float, default=0.0, help='beta1 for Adam optimizer')
 parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for Adam optimizer')
 parser.add_argument('--lr_D', type=float, default=5e-5, help='learning rate for Adam optimizer (Discriminator)')
-parser.add_argument('--lr_G', type=float, default=2e-4, help='learning rate for Adam optimizer (Generator)')
+parser.add_argument('--lr_G', type=float, default=1e-4, help='learning rate for Adam optimizer (Generator)')
 parser.add_argument('--gp_coeff', type=float, default=10, help='gradient penalty coefficient')
-parser.add_argument('--cl_coeff', type=float, default=0.1, help='consistency loss coefficient')
+parser.add_argument('--cl_coeff', type=float, default=10, help='consistency loss coefficient')
 parser.add_argument('--n_critic', type=int, default=3, help='D updates per G update')
 parser.add_argument('--nz', type=int, default=100, help='noise dimension')
-parser.add_argument('--epoch_num', type=int, default=100, help='number of epochs to train')
-parser.add_argument('--batch_size', type=int, default=30, help='batch size for training')
+parser.add_argument('--epoch_num', type=int, default=2, help='number of epochs to train')
+parser.add_argument('--batch_size', type=int, default=50, help='batch size for training')
 parser.add_argument('--model_info', type=str, default='_k4_CR', help='information about the model')
 parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
 
@@ -111,25 +111,29 @@ class DataAugmentation:
         self.wavelengths = np.linspace(wmin, wmax, n_wavelengths)
         self.relative_uncertainty = relative_uncertainty
         self.deformation_parameters = deformation_parameters
-        self.colorslopes_path = colorslopes_path
+        self.k_slopes_df = pd.read_csv(colorslopes_path)
 
     def augment(self, spectra_batch):
         '''Apply data augmentation to a batch of spectra.'''
-        augmented_spectra = torch.tensor([])
-        noise_batch = torch.tensor([])
-        for idx in range(spectra_batch.shape[0]):
-            # Apply random noise
-            noisetype = random.choice([1, 2, 3])
-            one_spectrum = spectra_batch[idx, 0, :]
-            spectrum, noisetype = self.addnoise(one_spectrum, noisetype)
-            if noisetype.item() == 0:
-                noisetype = random.choice([1, 2])
-                spectrum, noisetype = self.addnoise(one_spectrum, noisetype)
-            spectrum = spectrum.unsqueeze(0)  # Add batch dimension
-            spectrum = spectrum.unsqueeze(1)  # Add channel dimension
-            augmented_spectra = torch.cat((augmented_spectra, spectrum), dim=0)
-            noise_batch = torch.cat((noise_batch, noisetype.unsqueeze(0)), dim=0)
-            noise_batch = noise_batch.to(torch.int)
+        augmented = []
+        noise_types = []
+        # no autograd needed for augmentation itself
+        with torch.no_grad():
+            for idx in range(spectra_batch.shape[0]):
+                noisetype = random.choice([1, 2, 3])
+                one_spectrum = spectra_batch[idx, 0, :]
+
+                spectrum, nt = self.addnoise(one_spectrum, noisetype)
+                if nt.item() == 0:  # retry color failure
+                    noisetype = random.choice([1, 2])
+                    spectrum, nt = self.addnoise(one_spectrum, noisetype)
+
+                spectrum = spectrum.unsqueeze(0).to(device)
+                augmented.append(spectrum)
+                noise_types.append(nt)
+
+        augmented_spectra = torch.stack(augmented, dim=0).to(device)
+        noise_batch = torch.stack(noise_types, dim=0).to(device, dtype=torch.int)
         return augmented_spectra, noise_batch
 
     def addnoise(self, spectrum, noisetype: int):
@@ -156,7 +160,7 @@ class DataAugmentation:
                 return spectrum, noisetype
 
     def thermal_deformation(self, spectrum, temperature_change):
-        spectrum = spectrum.detach().numpy()
+        spectrum = spectrum.detach().cpu().numpy()
         wavelengths = self.wavelengths
 
         slope = self.deformation_parameters[0]  # Slope in cm^-1/K
@@ -196,30 +200,51 @@ class DataAugmentation:
         spectrum = torch.tensor(spectrum, dtype=torch.float32)
         return spectrum
 
-    def addcolor(self, spectrum, color = 'random', relative_concentration = (0.05, 0.1)):
-        spectrum_original = spectrum.clone()
-        if (max(spectrum) > 0.6) & (max(spectrum) < 1.0):
-            spectrum = spectrum.detach().numpy()
-            wavelengths = self.wavelengths
-            # Read the slope of extinction coefficients over concentration for the specified color
-            if color == 'random':
-                color = random.choice(list(color_labels.values()))
-            k_slopes = pd.read_csv(self.colorslopes_path)
-            k_slope = k_slopes[color].to_numpy(dtype=float)
-            # Calculate refractive index based on reflectance spectrum
-            fraction = 1 / (1 - spectrum)
-            if (fraction < 0).any() or np.isnan(fraction).any():
-                return spectrum_original, False
-            n = fraction + np.sqrt(fraction ** 2 - 1)
-            # Generate random concentration within the specified range
-            a = np.random.uniform(relative_concentration[0], relative_concentration[1])
-            # Varation of the reflectance
-            dr = - a * k_slope * 2 * np.pi / wavelengths * ((n ** 2 - 1) / (n ** 2 + 1)) ** 2
-            spectrum = spectrum + dr
-            spectrum = np.clip(spectrum, 0, 1)  # Ensure reflectance is within [0, 1]
-            return torch.tensor(spectrum, dtype=torch.float32), True
-        else:
-            return spectrum_original, False  # Return original spectrum if it is already colored
+    def addcolor(self, spectrum, color='random', relative_concentration=(0.05, 0.1)):
+        # Keep original around to return if we skip
+        spectrum_original = spectrum
+
+        # Fast max check (no Python built-in max)
+        smax = spectrum.max().item()
+        if not (0.6 < smax < 1.0):
+            return spectrum_original, False
+
+        # Choose color
+        if color == 'random':
+            color = random.choice(list(color_labels.values()))
+
+        # Move constants to the same device/dtype as spectrum
+        device = spectrum.device
+        dtype = spectrum.dtype
+        wavelengths = torch.as_tensor(self.wavelengths, device=device, dtype=dtype)
+
+        # k_slope as torch tensor (column from cached DF)
+        k_slope_np = self.k_slopes_df[color].to_numpy(dtype=float)
+        k_slope = torch.as_tensor(k_slope_np, device=device, dtype=dtype)
+
+        # Reflectance → refractive index (avoid NaNs/inf with protective clamp)
+        # fraction = 1 / (1 - R)
+        R = spectrum.clamp(max=0.9999)
+        fraction = 1.0 / (1.0 - R)
+
+        # Guard invalid: if any non-finite shows up, skip
+        if not torch.isfinite(fraction).all() or (fraction < 0).any():
+            return spectrum_original, False
+
+        n = fraction + torch.sqrt(fraction * fraction - 1.0)
+
+        # Random concentration a ~ U(low, high)
+        a = (relative_concentration[0] +
+            (relative_concentration[1] - relative_concentration[0]) *
+            torch.rand((), device=device, dtype=dtype))
+
+        # dr = - a * k_slope * 2π / λ * ((n^2 - 1)/(n^2 + 1))^2
+        n2 = n * n
+        term = ((n2 - 1.0) / (n2 + 1.0)) ** 2
+        dr = -a * k_slope * (2.0 * torch.pi) / wavelengths * term
+
+        spectrum_colored = (spectrum + dr).clamp_(0, 1)
+        return spectrum_colored, True
         
 def consistency_loss(D, real_samples, material_labels, noise_labels, data_augmentor):
     """Calculates the consistency loss for the discriminator."""
@@ -242,7 +267,7 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_expand("PlasticDataset/labeled/merged_dataset_withlabel.csv", print_info=True)
+    trainset = Dataset_expand("PlasticDataset/labeled_10materials/merged.csv", print_info=True)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     # initialize data augmentor

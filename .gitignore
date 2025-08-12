@@ -20,3 +20,6 @@
 /wgan.py
 /conditional_WGAN_train.py
 /README_old.md
+/run_all.bat
+/profile.stats
+/view_profile.py

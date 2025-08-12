@@ -37,7 +37,6 @@ def get_noise_labels(data_number_per_material, device,
 
     return noise_labels
 
-root = '/homes/kw635/spectrum_gen_1D/GANs-for-1D-Signal'
 nz = 100  
 
 data_number_per_material = parser.parse_args().data_number_per_material
@@ -47,7 +46,7 @@ save_path = 'synthetic_data'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 netG = CondGen1D(nz).to(device)
-netG.load_state_dict(torch.load(os.path.join(root, net_G_path)))
+netG.load_state_dict(torch.load(net_G_path))
 synthetic_data = pd.DataFrame()
 columns = list(np.linspace(400.0, 1700.0, 1301))  # Assuming wavelengths from 400 to 1700 nm
 columns = ['Material', 'NoiseType'] + columns
@@ -65,5 +64,5 @@ for key in material_dict.keys():
         synthetic_data.loc[len(synthetic_data)] = row
         print(f' {i + 1} / {data_number_per_material} synthetic spectra generated for {material_dict[key]}', end='\r')
 
-synthetic_data.to_csv(os.path.join(root, save_path, 'synthetic_data.csv'), index=False)
-print(f'\nSynthetic data generated and saved to {os.path.join(root, save_path, "synthetic_data.csv")}')
+synthetic_data.to_csv(os.path.join(save_path, 'synthetic_data.csv'), index=False)
+print(f'\nSynthetic data generated and saved to {os.path.join(save_path, "synthetic_data.csv")}')

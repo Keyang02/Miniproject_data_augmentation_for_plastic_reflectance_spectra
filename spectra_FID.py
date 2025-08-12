@@ -3,6 +3,7 @@ from pathlib import Path
 import base64
 import argparse
 
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -21,13 +22,21 @@ spectrum_length = 1301  # sampling number of each spectrum
 
 parser = argparse.ArgumentParser(description='Spectral FID Calculation')
 parser.add_argument('--model_info', type=str, default='_k4_GP', help='information about the model')
-parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
+parser.add_argument('--islog', type=bool, default=True, help='whether to log the training process')
 
 log_path = f'log/spectral_fid_values{parser.parse_args().model_info}.md'
 
-extractor_path = 'feature_extractor_11m_GP.pth'
+extractor_path = 'nets/netD_con_wgan_k4_GP.pth'
 
+# Set random seeds for reproducibility
+seed = 0
+np.random.seed(seed)
+random.seed(seed)
+torch.manual_seed(seed)
 torch.use_deterministic_algorithms(True)
+torch.backends.cudnn.benchmark = False
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 class DatasetReadCSV(Dataset):
     def __init__(self, 
@@ -129,6 +138,8 @@ def get_activations(loader: DataLoader, model: nn.Module, device: torch.device):
     with torch.no_grad():
         for spectra, materials, noise in loader:  # DataLoader returns tuple
             spectra = spectra.to(device)
+            materials = materials.to(device)
+            noise = noise.to(device)
             activations.append(model(spectra, materials, noise).cpu().numpy())
     return np.concatenate(activations, axis=0)
 
