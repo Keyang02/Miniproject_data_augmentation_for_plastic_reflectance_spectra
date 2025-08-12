@@ -23,3 +23,5 @@
 /run_all.bat
 /profile.stats
 /view_profile.py
+/preprocess.py
+/othermodel
