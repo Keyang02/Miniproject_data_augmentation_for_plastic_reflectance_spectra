@@ -5,6 +5,8 @@ import argparse
 import datetime
 import random
 import pandas as pd
+import imageio
+import re
 
 import torch
 import torch.nn as nn
@@ -12,12 +14,21 @@ import torch.optim as optim
 import torch.autograd as autograd
 
 from loaddataset import Dataset_expand
-from material_dict import material_labels
 
 from conditional_WGAN_net import init_weights
-from conditional_WGAN_net import CondCritic1D_PD_Stable as CondCritic1D
-from conditional_WGAN_net import CondGen1D_Upsample_FiLM_Optimized as CondGen1D
-from material_dict import material_labels, color_labels, noise_labels
+from conditional_WGAN_net import CondCritic1D_2labels as CondCritic1D
+from conditional_WGAN_net import CondGen1D_Upsample_2labels as CondGen1D
+
+material_labels = {
+    2 : "PP"
+}
+
+color_labels = {
+    1 : 'blue',
+    2 : 'orange',
+    3 : 'pink',
+    4 : 'yellow'
+}
 
 parser = argparse.ArgumentParser(description='Hyperparameters for Conditional WGAN-GP')
 parser.add_argument('--beta1', type=float, default=0.0, help='beta1 for Adam optimizer')
@@ -25,16 +36,13 @@ parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for Adam opt
 parser.add_argument('--lr_D', type=float, default=5e-5, help='learning rate for Adam optimizer (Discriminator)')
 parser.add_argument('--lr_G', type=float, default=1e-4, help='learning rate for Adam optimizer (Generator)')
 parser.add_argument('--gp_coeff', type=float, default=10, help='gradient penalty coefficient')
-parser.add_argument('--cl_coeff', type=float, default=10, help='consistency loss coefficient')
-parser.add_argument('--n_critic', type=int, default=3, help='D updates per G update')
+parser.add_argument('--cl_coeff', type=float, default=200, help='consistency loss coefficient')
+parser.add_argument('--n_critic', type=int, default=5, help='D updates per G update')
 parser.add_argument('--nz', type=int, default=100, help='noise dimension')
-parser.add_argument('--epoch_num', type=int, default=2, help='number of epochs to train')
-parser.add_argument('--batch_size', type=int, default=50, help='batch size for training')
-parser.add_argument('--model_info', type=str, default='_k4_CR', help='information about the model')
+parser.add_argument('--epoch_num', type=int, default=150, help='number of epochs to train')
+parser.add_argument('--batch_size', type=int, default=10, help='batch size for training')
+parser.add_argument('--model_info', type=str, default='_CR_small', help='information about the model')
 parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
-parser.add_argument('--trainset', type=str, choices=['large', 'small'], default='large', help='which trainset to use')
-parser.add_argument('--ignore_noise_labels', type=bool, default=False, help='whether to ignore noise labels')
-
 # hyperparameters
 beta1 = parser.parse_args().beta1               # beta1 for Adam optimizer
 beta2 = parser.parse_args().beta2               # beta2 for Adam optimizer
@@ -52,15 +60,11 @@ imgname = 'wgan_gp_epoch_{epoch}.png'
 net_G_path = f'nets/netG_con_wgan{suffix}.pth'
 net_D_path = f'nets/netD_con_wgan{suffix}.pth'
 log_path = f'log/spectral_fid_values{suffix}.md'
-
-if parser.parse_args().trainset == 'small':
-    trainset_path = 'PlasticDataset/small_sets/filtered_all_materials.csv'
-else:
-    trainset_path = 'PlasticDataset/labeled_10materials/merged.csv'
+loss_path = f'log/loss{suffix}.md'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-material_num = 11
+material_num = len(material_labels)
 
 def compute_gradient_penalty(D, real_samples, fake_samples, material_label, noise_label, oneside = False):
     """Calculates the gradient penalty loss for WGAN GP"""
@@ -95,14 +99,14 @@ def compute_gradient_penalty(D, real_samples, fake_samples, material_label, nois
 
 def intermediate_plot(fake, fixed_labels, imgname, material_num=11):
     f, axes = plt.subplots(4, material_num, figsize=(14, 8), sharex=True, sharey=True)
-    for rowidx in range(4):
-        for colidx in range(material_num):
-            idx = rowidx * material_num + colidx
+    if axes.ndim == 1:
+        axes = axes[:, np.newaxis]
+    for rowidx in range(2):
+        for colidx in range(2):
+            idx = rowidx * 2 + colidx
             axes[rowidx][colidx].plot(fake[idx].flatten().numpy())
             axes[rowidx][colidx].set_xticks([])
             axes[rowidx][colidx].set_yticks([])
-            if idx < material_num:
-                axes[rowidx][colidx].set_title(material_labels[fixed_labels[idx].item()])
     plt.tight_layout()
     plt.ylim(0, 1)
     plt.savefig(os.path.join('img', imgname))
@@ -127,7 +131,7 @@ class DataAugmentation:
         # no autograd needed for augmentation itself
         with torch.no_grad():
             for idx in range(spectra_batch.shape[0]):
-                noisetype = random.choice([1, 2, 3])
+                noisetype = random.choices([1, 2, 3], weights=[0.2, 0.2, 0.6])[0]  # color noise
                 one_spectrum = spectra_batch[idx, 0, :]
 
                 spectrum, nt = self.addnoise(one_spectrum, noisetype)
@@ -207,7 +211,7 @@ class DataAugmentation:
         spectrum = torch.tensor(spectrum, dtype=torch.float32)
         return spectrum
 
-    def addcolor(self, spectrum, color='random', relative_concentration=(0.1, 0.6)):
+    def addcolor(self, spectrum, color='random', relative_concentration=(0.2, 0.4)):
         # Keep original around to return if we skip
         spectrum_original = spectrum
 
@@ -255,8 +259,6 @@ class DataAugmentation:
         
 def consistency_loss(D, real_samples, material_labels, noise_labels, data_augmentor):
     """Calculates the consistency loss for the discriminator."""
-    if cl_coeff == 0:
-        return torch.tensor(0.0, device=device)
     # Apply data augmentation to real samples
     augmented_samples, _ = data_augmentor.augment(real_samples)
     # Get discriminator scores for augmented samples
@@ -276,14 +278,14 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_expand(trainset_path, print_info=True, expand_factor=True, ignore_noise_labels=parser.parse_args().ignore_noise_labels)
+    trainset = Dataset_expand("PlasticDataset/small_sets/spectra_sample_PP_100.csv", print_info=True, expand_factor=True, ignore_noise_labels=True)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     # initialize data augmentor
     data_augmentor = DataAugmentation()
 
     # initialize networks
-    netD = CondCritic1D(isCR=True, dropout=0.3).to(device)
+    netD = CondCritic1D(isCR=True).to(device)
     netG = CondGen1D(nz).to(device)
     netD.apply(init_weights)
     netG.apply(init_weights)
@@ -292,10 +294,8 @@ def main():
     fixed_noise = torch.randn(4 * material_num, nz, device=device)
     fixed_material_labels = torch.tensor(list(material_labels.keys()), device=device)
     fixed_material_labels = fixed_material_labels.repeat(4)
-    if parser.parse_args().ignore_noise_labels:
-        fixed_noise_labels = torch.zeros(4 * material_num, dtype=torch.int, device=device)
-    else:
-        fixed_noise_labels = torch.tensor(np.repeat(list(noise_labels.keys()), material_num), device=device)
+    # fixed_noise_labels = torch.tensor(np.repeat(list(noise_labels.keys()), material_num), device=device)
+    fixed_noise_labels = torch.zeros_like(fixed_material_labels)
 
     # optimizers (Adam for WGAN-GP)
     optimizerD = optim.Adam(netD.parameters(), lr=lr_D, betas=(beta1, beta2))
@@ -352,70 +352,148 @@ def main():
             optimizerG.step()
 
             # logging
-            if i % 5 == 0:
-                
-                if gp.item() != 0:
-                    cr_gp_ratio = f"{(cl.item())/(gp.item()):.4f}"
-                else:
-                    cr_gp_ratio = "N/A"
-                
-                print(f"[Epoch {epoch}/{epoch_num}] [Step {i}/{len(trainloader)}] "
-                      f"Loss_D: {loss_D.item():.4f}  Loss_G: {loss_G.item():.4f} "
-                      f"CR/GP: {cr_gp_ratio}")
-                
-            # save losses
-            loss_D_var.append(loss_D.item())
-            loss_G_var.append(loss_G.item())    
+
+            print(f"[Epoch {epoch}/{epoch_num}] [Step {i}/{len(trainloader)}] "
+                      f"Loss_D: {loss_D.item():.4f}  GP_ratio: {gp.item()/cl.item():.2f} "
+                      f"Loss_G: {loss_G.item():.4f}")
+
+        # save losses
+        loss_D_var.append(loss_D.item())
+        loss_G_var.append(loss_G.item())    
 
         # save intermediate plots
-        with torch.no_grad():
-            fake = netG(fixed_noise, fixed_material_labels, fixed_noise_labels).cpu()
-            intermediate_plot(fake, fixed_material_labels, imgname.format(epoch=epoch))
+        if epoch % 2 == 0:
+            with torch.no_grad():
+                fake = netG(fixed_noise, fixed_material_labels, fixed_noise_labels).cpu()
+                intermediate_plot(fake, fixed_material_labels, imgname.format(epoch=epoch), material_num=material_num)
+
+        # if epoch > 100 and loss_G.item() < 1:
+        #     print("Early stopping triggered")
+        #     break
 
     # save trained networks
     torch.save(netD.state_dict(), net_D_path)
     torch.save(netG.state_dict(), net_G_path)
     # save loss history
-    np.save('loss/wgan_gp_loss_D.npy', loss_D_var)
-    np.save('loss/wgan_gp_loss_G.npy', loss_G_var)
+    # np.save(loss_path + '_D.npy', loss_D_var)
+    # np.save(loss_path + '_G.npy', loss_G_var)
 
-    if not parser.parse_args().islog:
-        return
+    plt.figure()
+    plt.plot(loss_D_var, label='D Loss')
+    plt.plot(loss_G_var, label='G Loss')
+    plt.xlabel('Iterations')
+    plt.ylabel('Loss')
+    plt.ylim(-10, 10)
+    plt.legend()
+    plt.title('Loss Curves')
+    plt.savefig('loss/loss_curves_small.png')
+    plt.close()
 
-    hyperparams = {
-        'beta1': beta1,
-        'beta2': beta2,
-        'lr_D': lr_D,
-        'lr_G': lr_G,
-        'gp_coeff': gp_coeff,
-        'cl_coeff': cl_coeff,
-        'n_critic': n_critic,
-        'nz': nz,
-        'epoch_num': epoch_num,
-        'batch_size': batch_size
-    }
-    runningtime = datetime.datetime.now() - datetime.datetime.strptime(starttime, "%Y-%m-%d %H:%M:%S")
-    newline = "\n"
+    gifkeyword='wgan_gp'
+    gifname='smallset.gif'
+    os.makedirs('gif', exist_ok=True)
+    with imageio.get_writer(os.path.join('gif', gifname), mode='I', duration=1) as writer:
+        imgfolder_path = os.path.join('img')
+        for gifname in sorted(os.listdir(imgfolder_path)):
+            if gifname.endswith('.png') and gifkeyword in gifname:
+                image_path = os.path.join(imgfolder_path, gifname)
+                image = imageio.imread(image_path)
+                writer.append_data(image)
+                os.remove(image_path)  # Remove the image after adding to GIF
 
-    if os.path.exists(log_path):
-        with open(log_path, 'a') as md:
-            md.write(newline * 2)
 
-    with open(log_path, 'a') as md:
-        md.write('# Training Log for GAN with Gradient Penalty and Consistency Regularization' + newline + newline)
-        md.write('> ### TimeStamp' + newline)
-        md.write('> Training started at: ' + starttime + '  ' + newline)
-        md.write('> Training finished at: ' + str(datetime.datetime.now()) + '  ' + newline)
-        md.write('> Total training time: ' + str(runningtime) + '  ' + newline)
-        md.write(newline * 2)
+def visualize_results(seed_real=42, seed_fake=37, noise_in = None):
+    trainset = Dataset_expand("PlasticDataset/small_sets/spectra_sample_PP_50.csv", print_info=True, expand_factor=False)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=False, drop_last=True)
 
-        md.write('> ### Hyperparameters' + newline)
-        md.write('> | Parameter | Value |' + newline)
-        md.write('> |-----------|-------|' + newline)
-        for k, v in hyperparams.items():
-            md.write(f'> | {k} | {v} |' + newline)
-        md.write(newline * 2)
+    num_fake = batch_size
+    netG = CondGen1D(nz).to(device)
+    netG.load_state_dict(torch.load(net_G_path))
+    netG.eval()
+    if noise_in is not None:
+        noise = noise_in
+    else:
+        noise = torch.randn(num_fake, nz, generator=torch.Generator().manual_seed(seed_fake)).to(device)
+    mat_labels = torch.ones(num_fake, device=device, dtype=torch.int) * 2
+    ns_labels = torch.zeros(num_fake, device=device, dtype=torch.int)
+    fake_plt = netG(noise, mat_labels, ns_labels).cpu().detach().numpy()
+
+    loader_iter = iter(trainloader)
+    real_plt = next(loader_iter)[0].cpu()
+    data_augmentor = DataAugmentation()
+    augmented_real, _ = data_augmentor.augment(real_plt)
+
+    real_plt = real_plt.detach().numpy()
+
+    f, axs = plt.subplots(4, batch_size // 2, figsize=(10, 6))
+    axs = axs.flatten()
+    for i in range(batch_size*2):
+        if i < batch_size:
+            axs[i].plot(real_plt[i].flatten(), color='blue')
+            axs[i].set_xticks([])
+            axs[i].set_yticks([])
+            axs[i].set_ylim(0, 1)
+        else:
+            axs[i].plot(fake_plt[i - batch_size].flatten(), color='red')
+            axs[i].set_xticks([])
+            axs[i].set_yticks([])
+            axs[i].set_ylim(0, 1)
+
+    plt.tight_layout()
+    plt.show()
+
+    # save_noise(noise.cpu(), [0,2,6,7], [2,2,2,2])
+
+def save_noise(noise, indices, mat_labels, save_dir="temporary", prefix="noise"):
+
+    assert len(indices) == len(mat_labels), "indices and labels must match in length"
+    os.makedirs(save_dir, exist_ok=True)
+    
+    save_dict = {}
+    for idx, label in zip(indices, mat_labels):
+        if label not in save_dict:
+            save_dict[label] = []
+        save_dict[label].append(noise[idx])
+
+    # find all existing files that match prefix
+    existing_files = [f for f in os.listdir(save_dir) if f.startswith(prefix) and f.endswith(".pt")]
+
+    # extract numbers using regex
+    numbers = []
+    for f in existing_files:
+        match = re.search(r"_(\d+)\.pt$", f)
+        if match:
+            numbers.append(int(match.group(1)))
+    next_num = max(numbers) + 1 if numbers else 1
+
+    # final file name
+    file_name = f"{prefix}_{next_num}.pt"
+    path = os.path.join(save_dir, file_name)
+    
+    torch.save(save_dict, path)
+    print(f"Saved {len(save_dict)} items to {path}")
+    return path
+
+def load_noise(read_dir="temporary"):
+    merged_dict = {}
+
+    for f in os.listdir(read_dir):
+        data = torch.load(os.path.join(read_dir, f))
+        for key, _ in data.items():
+            if key not in merged_dict:
+                merged_dict[key] = []
+            merged_dict[key] += data[key]
+            
+    # combine into a tensor
+    for key in merged_dict:
+        combined_noise = torch.stack(merged_dict[key], dim=0)
+
+    return combined_noise
 
 if __name__ == '__main__':
     main()
-    
+    # 37 [0,1,4,7]
+    # noise_in = load_noise()
+    # visualize_results(seed_real=42, seed_fake=43, noise_in=noise_in.to(device))
+
+    visualize_results(seed_real=42, seed_fake=90)

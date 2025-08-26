@@ -22,11 +22,19 @@ spectrum_length = 1301  # sampling number of each spectrum
 
 parser = argparse.ArgumentParser(description='Spectral FID Calculation')
 parser.add_argument('--model_info', type=str, default='_k4_GP', help='information about the model')
-parser.add_argument('--islog', type=bool, default=True, help='whether to log the training process')
+parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
+parser.add_argument('--trainset', type=str, choices=['large', 'small'], default='large', help='which trainset to use')
 
 log_path = f'log/spectral_fid_values{parser.parse_args().model_info}.md'
 
-extractor_path = 'nets/netD_con_wgan_k4_GP.pth'
+
+
+if parser.parse_args().trainset == 'small':
+    trainset_path = 'PlasticDataset/small_sets/filtered_all_materials.csv'
+    extractor_path = 'feature_extractor_CR_small.pth'
+else:
+    trainset_path = 'PlasticDataset/labeled_10materials/merged.csv'
+    extractor_path = 'feature_extractor_CR.pth'
 
 # Set random seeds for reproducibility
 seed = 0
@@ -154,7 +162,13 @@ def compute_statistics(acts: np.ndarray):
 def calculate_fid(mu1, sigma1, mu2, sigma2):
     """Classic Fréchet distance between two Gaussians."""
     diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1 @ sigma2, disp=False)
+    # covmean, _ = linalg.sqrtm(sigma1 @ sigma2, disp=False)
+
+    covmean = linalg.sqrtm(sigma1 @ sigma2)
+    # Handle numerical errors (small imaginary parts)
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+
     if np.iscomplexobj(covmean):
         covmean = covmean.real  # numerical cleanup
     fid_val = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
@@ -167,7 +181,7 @@ def calculate_fid(mu1, sigma1, mu2, sigma2):
 def fed_one_material(material: int):  # noqa: D401
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    real_csv_path = 'PlasticDataset/labeled_10materials/merged.csv'
+    real_csv_path = trainset_path
     fake_csv_path = 'synthetic_data/synthetic_data.csv'
     # ------------------------ Data ------------------------
     real_ds = DatasetReadCSV(real_csv_path, material_id=material)
@@ -217,7 +231,7 @@ if __name__ == "__main__":
 
     f, ax = plt.subplots(figsize=(10, 5))
     barchart = ax.bar(material_labels.values(), fid_values, color='skyblue')
-    ax.bar_label(barchart, fmt='%.2f')
+    ax.bar_label(barchart, fmt='%.3f')
     ax.set_xlabel('Material')
     ax.set_ylabel('FID Value')
     ax.set_title('Spectral FID Values by Material')

@@ -8,16 +8,22 @@ import base64
 import argparse
 
 from material_dict import material_labels as material_dict
-from conditional_WGAN_net import CondGen1D_ConvT_2labels as CondGen1D
-from loaddataset import Dataset_addnoise, Dataset_csv, Dataset_expand
+from conditional_WGAN_net import CondGen1D_Upsample_FiLM_Optimized as CondGen1D
+from loaddataset import Dataset_expand
 
 parser = argparse.ArgumentParser(description='Visualisation')
-parser.add_argument('--model_info', type=str, default='_k4_GP', help='information about the model')
+parser.add_argument('--model_info', type=str, default='_k4_CR', help='information about the model')
 parser.add_argument('--material_num', type=int, default=11, help='number of materials')
 parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
+parser.add_argument('--trainset', type=str, choices=['large', 'small'], default='large', help='which trainset to use')
 
 net_G_path = f'nets/netG_con_wgan{parser.parse_args().model_info}.pth'
 log_path = f'log/spectral_fid_values{parser.parse_args().model_info}.md'
+
+if parser.parse_args().trainset == 'small':
+    trainset_path = 'PlasticDataset/small_sets/filtered_all_materials.csv'
+else:
+    trainset_path = 'PlasticDataset/labeled_10materials/merged.csv'
 
 material_num = parser.parse_args().material_num
 
@@ -195,13 +201,13 @@ def plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100,
     noise = torch.randn(batchsize * label_length, nz, device=device)
     fake = netG(noise, material_labels, noise_labels).detach().cpu().numpy()
 
-    f, ax = plt.subplots(4, label_length, figsize=(14, 8), sharex=True, sharey=True)
+    f, ax = plt.subplots(4, label_length, figsize=(18, 8), sharex=True, sharey=True)
     for colidx in range(label_length):
         for rowidx in range(2 * batchsize):
             if rowidx < batchsize:
                 idx = rowidx + colidx * batchsize
                 ax[rowidx][colidx].plot(real[idx].flatten(), label='Real', color='blue')
-                ax[rowidx][colidx].legend('real')
+                # ax[rowidx][colidx].legend('real')
                 ax[rowidx][colidx].set_xticks(())
                 ax[rowidx][colidx].set_yticks((0,1))
                 if rowidx < 1:
@@ -209,7 +215,7 @@ def plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100,
             else:
                 idx = rowidx + colidx * batchsize - batchsize
                 ax[rowidx][colidx].plot(fake[idx].flatten(), label='Fake', color='red')
-                ax[rowidx][colidx].legend('fake')
+                # ax[rowidx][colidx].legend('fake')
                 ax[rowidx][colidx].set_xticks(())
                 ax[rowidx][colidx].set_yticks((0,1))
     plt.tight_layout()
@@ -254,7 +260,7 @@ def visualise_condWGAN_2labels():
     netG.load_state_dict(torch.load(net_G_path))
 
     label_list = range(0, material_num)
-    plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100, label_list=label_list)
+    plot_realvsfake_cond_all_2labels(netG, device, batchsize=2, nz=100, label_list=label_list, dataset_path=trainset_path)
     print('Real vs Fake plot for all materials saved as real_vs_fake_all_materials.png')
 
 if __name__ == '__main__':

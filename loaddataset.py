@@ -164,18 +164,21 @@ class Dataset_addnoise(Dataset):
 class Dataset_expand(Dataset):
     def __init__(self, dataset_path, print_info=False, 
                  wmin=400, wmax=1700, n_wavelengths=1301,
-                 expand_factor:list | bool=(0.2, 0.2, 0.2),                 # (Gaussian, Distortion, Color)
+                 expand_factor:list | bool=[0.2, 0.2, 0.2],                 # (Gaussian, Distortion, Color)
                  relative_uncertainty=0.005,
-                 deformation_parameters=(1, 10, -20, 20),
-                 colorslopes_path='PlasticDataset/color/dye_extinctioncoeff_slopes.csv'
+                 deformation_parameters=(1, 10, 0, 20),
+                 colorslopes_path='PlasticDataset/color/dye_extinctioncoeff_slopes.csv',
+                 ignore_noise_labels=False,
+                 filter_materials:list | None = None
                  ):
         self.wavelengths = np.linspace(wmin, wmax, n_wavelengths)
         self.relative_uncertainty = relative_uncertainty  # Relative uncertainty for Gaussian noise
         # Parameters for thermal deformation: (slope(cm^-1/K), parameter to calculate FWHM, min_temp_change(K), max_temp_change(K))
         self.deformation_parameters = deformation_parameters
         self.colorslopes_path = colorslopes_path
+        self.ignore_noise_labels = ignore_noise_labels
 
-        self.dataset, self.labels, self.noisetype = self.build_dataset(dataset_path, print_info)
+        self.dataset, self.labels, self.noisetype = self.build_dataset(dataset_path, print_info, filter_materials=filter_materials)
 
         if type(expand_factor) == list:
             self.expand_dataset(expand_factor)
@@ -190,13 +193,20 @@ class Dataset_expand(Dataset):
     def __getitem__(self, idx):
         spectrum = self.dataset[idx, :]
         material = self.labels[idx]
-        noisetype = self.noisetype[idx]
+        if self.ignore_noise_labels:
+            noisetype = torch.tensor(0, dtype=torch.int)
+        else:
+            noisetype = self.noisetype[idx]
         spectrum = torch.unsqueeze(spectrum, 0)        # Add channel dimension
         return spectrum, material, noisetype
 
-    def build_dataset(self, dataset_path, print_info):
+    def build_dataset(self, dataset_path, print_info, filter_materials=None):
         '''get dataset of signal'''
         df = pd.read_csv(dataset_path)
+
+        if filter_materials is not None:
+            df = df[df['Material'].isin(filter_materials)]
+
         if print_info:
             print(f"The number of each material: {df['Material'].value_counts()}")
         material = df['Material'].values.copy()
@@ -265,7 +275,7 @@ class Dataset_expand(Dataset):
         dwn = wavenumbers_uniform[1] - wavenumbers_uniform[0]  # Wavenumber resolution
 
         # Calculate the wavelength drift caused by temperature change
-        wavenumber_drift = wavenumbers_uniform  + slope * temperature_change
+        wavenumber_drift = wavenumbers_uniform  - slope * temperature_change
         spectrum_wn = np.interp(wavenumber_drift, wavenumbers_uniform, spectrum_wn)
         # Apply Gaussian filter to simulate thermal deformation
 
@@ -315,39 +325,40 @@ class Dataset_expand(Dataset):
 
 
 if __name__ == '__main__':
-    dataset = Dataset_addnoise('PlasticDataset/labeled/merged_dataset_withlabel.csv')
+    dataset = Dataset_expand('PlasticDataset\\small_sets\\filtered_all_materials.csv', print_info=True, expand_factor=False)
     print(f"Dataset length: {len(dataset)}")
     datapoint, label, noisetype = dataset.__getitem__(0)
     print(f"First datapoint shape: {datapoint.shape}")
     print(f"First label: {label}")
     print(f"First noisetype: {noisetype}")
-    trainloader = torch.utils.data.DataLoader(
-        dataset, batch_size=1, shuffle=True
-    )
+    
+    # trainloader = torch.utils.data.DataLoader(
+    #     dataset, batch_size=1, shuffle=True
+    # )
 
-    for _, (spectrum, label, noisetype) in enumerate(trainloader):
-        if noisetype.item() == 1:
-            plt.plot(spectrum.detach().numpy().flatten())
-            plt.xlabel("Wavelength")
-            plt.ylabel("Reflectance")
-            plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
-            plt.close()
-            break
+    # for _, (spectrum, label, noisetype) in enumerate(trainloader):
+    #     if noisetype.item() == 1:
+    #         plt.plot(spectrum.detach().numpy().flatten())
+    #         plt.xlabel("Wavelength")
+    #         plt.ylabel("Reflectance")
+    #         plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
+    #         plt.close()
+    #         break
 
-    for _, (spectrum, label, noisetype) in enumerate(trainloader):
-        if noisetype.item() == 2:
-            plt.plot(spectrum.detach().numpy().flatten())
-            plt.xlabel("Wavelength")
-            plt.ylabel("Reflectance")
-            plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
-            plt.close()
-            break
+    # for _, (spectrum, label, noisetype) in enumerate(trainloader):
+    #     if noisetype.item() == 2:
+    #         plt.plot(spectrum.detach().numpy().flatten())
+    #         plt.xlabel("Wavelength")
+    #         plt.ylabel("Reflectance")
+    #         plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
+    #         plt.close()
+    #         break
 
-    for _, (spectrum, label, noisetype) in enumerate(trainloader):
-        if noisetype.item() == 3:
-            plt.plot(spectrum.detach().numpy().flatten())
-            plt.xlabel("Wavelength")
-            plt.ylabel("Reflectance")
-            plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
-            plt.close()
-            break
+    # for _, (spectrum, label, noisetype) in enumerate(trainloader):
+    #     if noisetype.item() == 3:
+    #         plt.plot(spectrum.detach().numpy().flatten())
+    #         plt.xlabel("Wavelength")
+    #         plt.ylabel("Reflectance")
+    #         plt.savefig(f"img/spectrum_{material_labels[label.item()]}_noisetype_{noise_labels[noisetype.item()]}.png")
+    #         plt.close()
+    #         break

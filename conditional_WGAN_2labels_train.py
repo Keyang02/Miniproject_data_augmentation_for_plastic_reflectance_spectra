@@ -14,7 +14,7 @@ from material_dict import material_labels
 
 from conditional_WGAN_net import init_weights
 from conditional_WGAN_net import CondCritic1D_2labels as CondCritic1D
-from conditional_WGAN_net import CondGen1D_ConvT_2labels as CondGen1D
+from conditional_WGAN_net import CondGen1D_Upsample_2labels as CondGen1D
 from material_dict import material_labels, noise_labels
 
 parser = argparse.ArgumentParser(description='Hyperparameters for Conditional WGAN-GP')
@@ -22,7 +22,7 @@ parser.add_argument('--beta1', type=float, default=0.0, help='beta1 for Adam opt
 parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for Adam optimizer')
 parser.add_argument('--lr_D', type=float, default=1e-4, help='learning rate for Adam optimizer (Discriminator)')
 parser.add_argument('--lr_G', type=float, default=1e-4, help='learning rate for Adam optimizer (Generator)')
-parser.add_argument('--p_coeff', type=float, default=10, help='gradient penalty coefficient')
+parser.add_argument('--gp_coeff', type=float, default=10, help='gradient penalty coefficient')
 parser.add_argument('--n_critic', type=int, default=3, help='D updates per G update')
 parser.add_argument('--nz', type=int, default=100, help='noise dimension')
 parser.add_argument('--epoch_num', type=int, default=2, help='number of epochs to train')
@@ -35,7 +35,7 @@ beta1 = parser.parse_args().beta1               # beta1 for Adam optimizer
 beta2 = parser.parse_args().beta2               # beta2 for Adam optimizer
 lr_D = parser.parse_args().lr_D                 # learning rate for Adam optimizer (Discriminator)
 lr_G = parser.parse_args().lr_G                 # learning rate for Adam optimizer (Generator)
-p_coeff = parser.parse_args().p_coeff           # gradient penalty coefficient
+gp_coeff = parser.parse_args().gp_coeff         # gradient penalty coefficient
 n_critic = parser.parse_args().n_critic         # D updates per G update
 nz = parser.parse_args().nz                     # noise dimension
 epoch_num = parser.parse_args().epoch_num       # number of epochs to train
@@ -77,7 +77,7 @@ def compute_gradient_penalty(D, real_samples, fake_samples, material_label, nois
         # If grad_norm is less than 1, the penalty is zero.
         grad_deviation = torch.where(grad_deviation < 0, torch.zeros_like(grad_deviation), grad_deviation)
 
-    penalty = p_coeff * (grad_deviation ** 2).mean()
+    penalty = gp_coeff * (grad_deviation ** 2).mean()
     return penalty
 
 def intermediate_plot(fake, fixed_labels, imgname, material_num=11):
@@ -197,7 +197,7 @@ def main():
         'beta2': beta2,
         'lr_D': lr_D,
         'lr_G': lr_G,
-        'gp_coeff': p_coeff,
+        'gp_coeff': gp_coeff,
         'n_critic': n_critic,
         'nz': nz,
         'epoch_num': epoch_num,

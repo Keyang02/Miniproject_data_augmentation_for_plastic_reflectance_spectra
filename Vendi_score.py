@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser(description='Vendi Score Calculation')
 parser.add_argument('--embed_method', type=str, default='resample', choices=['resample', 'nn'], help='Method to embed spectra')
 parser.add_argument('--model_info', type=str, default='_k4_CR', help='information about the model')
 parser.add_argument('--vs_method', type=str, default='inner_product', choices=['inner_product', 'RBF'], help='Method to compute Vendi Score')
-parser.add_argument('--islog', type=bool, default=True, help='Whether to log-transform the spectra')
+parser.add_argument('--islog', type=bool, default=False, help='Whether to log-transform the spectra')
 
 if 'k4' in parser.parse_args().model_info:
     extractor_path = 'nets/feature_extractor_k4.pth'
@@ -141,6 +141,7 @@ def vendi_score_inner_product(X: torch.Tensor) -> float:
     n, d = X.shape
     # Compute Gram matrix
     K = X @ X.T                  # shape (n, n)
+    K = torch.clamp(K, min=0)  # ensure non-negative
     K_normalized = K / n         # divide by n
     # Eigenvalues or directly trace of K_normalized log K_normalized
     # But since trace( A log A ) = sum_i λ_i log λ_i for eigenvalues λ_i of A:
