@@ -20,6 +20,10 @@ parser.add_argument('--embed_method', type=str, default='resample', choices=['re
 parser.add_argument('--model_info', type=str, default='_k4_CR', help='information about the model')
 parser.add_argument('--vs_method', type=str, default='inner_product', choices=['inner_product', 'RBF'], help='Method to compute Vendi Score')
 parser.add_argument('--islog', type=bool, default=False, help='Whether to log-transform the spectra')
+parser.add_argument('--selected_material', type=int, default=None, help='which material to use')
+
+if parser.parse_args().selected_material is not None:
+    material_labels = {parser.parse_args().selected_material: material_labels[parser.parse_args().selected_material]}
 
 if 'k4' in parser.parse_args().model_info:
     extractor_path = 'nets/feature_extractor_k4.pth'

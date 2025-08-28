@@ -13,6 +13,7 @@ from material_dict import material_labels as material_dict
 parser = argparse.ArgumentParser(description='Generate Synthetic Data')
 parser.add_argument('--data_number_per_material', type=int, default=1500, help='number of synthetic data per material')
 parser.add_argument('--model_info', type=str, default='_k4_GP', help='information about the model')
+parser.add_argument('--selected_material', default=None, help='which material to use')
 
 allowable_noise_types = Literal['average', 'no_noise', 'emphasis_no_noise']
 
@@ -41,7 +42,13 @@ nz = 100
 batch_size = 50
 
 data_number_per_material = parser.parse_args().data_number_per_material
-net_G_path = f'nets/netG_con_wgan{parser.parse_args().model_info}.pth'
+if parser.parse_args().selected_material is not None:
+    if int(parser.parse_args().selected_material) in material_dict:
+        net_G_path = f'nets/netG_{material_dict[int(parser.parse_args().selected_material)]}.pth'
+    else:
+        raise ValueError(f"Selected material {parser.parse_args().selected_material} is not in the material dictionary.")
+else:
+    net_G_path = f'nets/netG_con_wgan{parser.parse_args().model_info}.pth'
 save_path = 'synthetic_data'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

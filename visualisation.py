@@ -8,7 +8,7 @@ import base64
 import argparse
 
 from material_dict import material_labels as material_dict
-from conditional_WGAN_net import CondGen1D_Upsample_FiLM_Optimized as CondGen1D
+from conditional_WGAN_net import CondGen1D_Upsample_2labels as CondGen1D
 from loaddataset import Dataset_expand
 
 parser = argparse.ArgumentParser(description='Visualisation')

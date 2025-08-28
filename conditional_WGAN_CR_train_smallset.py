@@ -14,14 +14,11 @@ import torch.optim as optim
 import torch.autograd as autograd
 
 from loaddataset import Dataset_expand
+from material_dict import material_labels
 
 from conditional_WGAN_net import init_weights
 from conditional_WGAN_net import CondCritic1D_2labels as CondCritic1D
 from conditional_WGAN_net import CondGen1D_Upsample_2labels as CondGen1D
-
-material_labels = {
-    2 : "PP"
-}
 
 color_labels = {
     1 : 'blue',
@@ -36,13 +33,18 @@ parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for Adam opt
 parser.add_argument('--lr_D', type=float, default=5e-5, help='learning rate for Adam optimizer (Discriminator)')
 parser.add_argument('--lr_G', type=float, default=1e-4, help='learning rate for Adam optimizer (Generator)')
 parser.add_argument('--gp_coeff', type=float, default=10, help='gradient penalty coefficient')
-parser.add_argument('--cl_coeff', type=float, default=200, help='consistency loss coefficient')
+parser.add_argument('--cl_coeff', type=float, default=5, help='consistency loss coefficient')
 parser.add_argument('--n_critic', type=int, default=5, help='D updates per G update')
 parser.add_argument('--nz', type=int, default=100, help='noise dimension')
-parser.add_argument('--epoch_num', type=int, default=150, help='number of epochs to train')
-parser.add_argument('--batch_size', type=int, default=10, help='batch size for training')
+parser.add_argument('--epoch_num', type=int, default=100, help='number of epochs to train')
+parser.add_argument('--batch_size', type=int, default=50, help='batch size for training')
 parser.add_argument('--model_info', type=str, default='_CR_small', help='information about the model')
 parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
+parser.add_argument('--selected_material', type=int, default=4, help='which material to use')
+parser.add_argument('--activation', type=str, default='tanh', help='activation function for the generator output')
+
+material_labels = {parser.parse_args().selected_material: material_labels[parser.parse_args().selected_material]}
+
 # hyperparameters
 beta1 = parser.parse_args().beta1               # beta1 for Adam optimizer
 beta2 = parser.parse_args().beta2               # beta2 for Adam optimizer
@@ -57,8 +59,8 @@ batch_size = parser.parse_args().batch_size     # batch size for training
 
 suffix = parser.parse_args().model_info         # model information suffix for output files
 imgname = 'wgan_gp_epoch_{epoch}.png'
-net_G_path = f'nets/netG_con_wgan{suffix}.pth'
-net_D_path = f'nets/netD_con_wgan{suffix}.pth'
+net_G_path = f'nets/netG_{material_labels[parser.parse_args().selected_material]}.pth'
+net_D_path = f'nets/netD_{material_labels[parser.parse_args().selected_material]}.pth'
 log_path = f'log/spectral_fid_values{suffix}.md'
 loss_path = f'log/loss{suffix}.md'
 
@@ -98,15 +100,17 @@ def compute_gradient_penalty(D, real_samples, fake_samples, material_label, nois
     return penalty
 
 def intermediate_plot(fake, fixed_labels, imgname, material_num=11):
-    f, axes = plt.subplots(4, material_num, figsize=(14, 8), sharex=True, sharey=True)
+    f, axes = plt.subplots(2, 2, figsize=(10, 8), sharex=True, sharey=True)
     if axes.ndim == 1:
         axes = axes[:, np.newaxis]
     for rowidx in range(2):
         for colidx in range(2):
             idx = rowidx * 2 + colidx
-            axes[rowidx][colidx].plot(fake[idx].flatten().numpy())
+            axes[rowidx][colidx].plot(fake[idx].flatten().numpy(), linewidth=2.5)
             axes[rowidx][colidx].set_xticks([])
             axes[rowidx][colidx].set_yticks([])
+            for spine in axes[rowidx][colidx].spines.values():
+                spine.set_linewidth(2)
     plt.tight_layout()
     plt.ylim(0, 1)
     plt.savefig(os.path.join('img', imgname))
@@ -131,7 +135,7 @@ class DataAugmentation:
         # no autograd needed for augmentation itself
         with torch.no_grad():
             for idx in range(spectra_batch.shape[0]):
-                noisetype = random.choices([1, 2, 3], weights=[0.2, 0.2, 0.6])[0]  # color noise
+                noisetype = random.choices([1, 2, 3], weights=[0.2, 0.2, 0])[0]  # color noise
                 one_spectrum = spectra_batch[idx, 0, :]
 
                 spectrum, nt = self.addnoise(one_spectrum, noisetype)
@@ -278,7 +282,8 @@ def main():
     os.makedirs('nets', exist_ok=True)
 
     # load data
-    trainset = Dataset_expand("PlasticDataset/small_sets/spectra_sample_PP_100.csv", print_info=True, expand_factor=True, ignore_noise_labels=True)
+    trainset = Dataset_expand("PlasticDataset/small_sets/filtered_all_materials.csv", 
+                              print_info=True, expand_factor=False, ignore_noise_labels=True, filter_materials=list(material_labels.keys()))
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     # initialize data augmentor
@@ -286,7 +291,7 @@ def main():
 
     # initialize networks
     netD = CondCritic1D(isCR=True).to(device)
-    netG = CondGen1D(nz).to(device)
+    netG = CondGen1D(nz, activation=parser.parse_args().activation).to(device)
     netD.apply(init_weights)
     netG.apply(init_weights)
 
@@ -354,7 +359,7 @@ def main():
             # logging
 
             print(f"[Epoch {epoch}/{epoch_num}] [Step {i}/{len(trainloader)}] "
-                      f"Loss_D: {loss_D.item():.4f}  GP_ratio: {gp.item()/cl.item():.2f} "
+                      f"Loss_D: {loss_D.item():.4f}  "
                       f"Loss_G: {loss_G.item():.4f}")
 
         # save losses
@@ -374,9 +379,10 @@ def main():
     # save trained networks
     torch.save(netD.state_dict(), net_D_path)
     torch.save(netG.state_dict(), net_G_path)
+
     # save loss history
-    # np.save(loss_path + '_D.npy', loss_D_var)
-    # np.save(loss_path + '_G.npy', loss_G_var)
+    np.save(loss_path + '_D_small.npy', loss_D_var)
+    np.save(loss_path + '_G_small.npy', loss_G_var)
 
     plt.figure()
     plt.plot(loss_D_var, label='D Loss')
@@ -402,19 +408,20 @@ def main():
                 os.remove(image_path)  # Remove the image after adding to GIF
 
 
-def visualize_results(seed_real=42, seed_fake=37, noise_in = None):
-    trainset = Dataset_expand("PlasticDataset/small_sets/spectra_sample_PP_50.csv", print_info=True, expand_factor=False)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=False, drop_last=True)
+def visualize_results(seed_real=42, seed_fake=37, noise_in = None, col_num=5):
+    trainset = Dataset_expand("PlasticDataset/small_sets/filtered_all_materials.csv", 
+                            print_info=True, expand_factor=False, filter_materials=list(material_labels.keys()))
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     num_fake = batch_size
-    netG = CondGen1D(nz).to(device)
+    netG = CondGen1D(nz, activation=parser.parse_args().activation).to(device)
     netG.load_state_dict(torch.load(net_G_path))
     netG.eval()
     if noise_in is not None:
         noise = noise_in
     else:
         noise = torch.randn(num_fake, nz, generator=torch.Generator().manual_seed(seed_fake)).to(device)
-    mat_labels = torch.ones(num_fake, device=device, dtype=torch.int) * 2
+    mat_labels = torch.ones(num_fake, device=device, dtype=torch.int) * material_labels.keys().__iter__().__next__()
     ns_labels = torch.zeros(num_fake, device=device, dtype=torch.int)
     fake_plt = netG(noise, mat_labels, ns_labels).cpu().detach().numpy()
 
@@ -425,22 +432,24 @@ def visualize_results(seed_real=42, seed_fake=37, noise_in = None):
 
     real_plt = real_plt.detach().numpy()
 
-    f, axs = plt.subplots(4, batch_size // 2, figsize=(10, 6))
+    f, axs = plt.subplots(4, col_num, figsize=(10, 6))
     axs = axs.flatten()
-    for i in range(batch_size*2):
-        if i < batch_size:
+    for i in range(col_num*4):
+        if i < col_num*2:
             axs[i].plot(real_plt[i].flatten(), color='blue')
             axs[i].set_xticks([])
             axs[i].set_yticks([])
             axs[i].set_ylim(0, 1)
         else:
-            axs[i].plot(fake_plt[i - batch_size].flatten(), color='red')
+            axs[i].plot(fake_plt[i - col_num*2].flatten(), color='red')
             axs[i].set_xticks([])
             axs[i].set_yticks([])
             axs[i].set_ylim(0, 1)
 
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.savefig(f'img/real_vs_fake_{material_labels[parser.parse_args().selected_material]}.png')
+    plt.close()
 
     # save_noise(noise.cpu(), [0,2,6,7], [2,2,2,2])
 
@@ -496,4 +505,4 @@ if __name__ == '__main__':
     # noise_in = load_noise()
     # visualize_results(seed_real=42, seed_fake=43, noise_in=noise_in.to(device))
 
-    visualize_results(seed_real=42, seed_fake=90)
+    visualize_results(seed_real=42, seed_fake=45)

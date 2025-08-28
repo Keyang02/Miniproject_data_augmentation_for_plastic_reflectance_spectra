@@ -270,7 +270,8 @@ class CondGen1D_Upsample_2labels(nn.Module):
                  embed_classes2: int = 4,
                  embed_dim2: int = 8,
                  base_c: int = 256,
-                 target_len: int = 1301):
+                 target_len: int = 1301,
+                 activation: str = "tanh"):
         super().__init__()
         self.target_len = target_len
 
@@ -290,10 +291,16 @@ class CondGen1D_Upsample_2labels(nn.Module):
         )
 
         # final conv to reach exactly 1301
-        self.final = nn.Sequential(
-            nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3),
-            nn.Tanh()
-        )
+        if activation == "tanh":
+            self.final = nn.Sequential(
+                nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3),
+                nn.Tanh()
+            )
+        elif activation == "sigmoid":
+            self.final = nn.Sequential(
+                nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3),
+                nn.Sigmoid()
+            )
 
         def _init_film(m):
             if isinstance(m, FiLM1D):
@@ -422,7 +429,8 @@ class CondGen1D_Upsample_FiLM_Optimized(nn.Module):
     def __init__(self, latent_dim=100,
                  embed_classes1=11, embed_dim1=16,
                  embed_classes2=4,  embed_dim2=8,
-                 base_c=256, target_len=1301):
+                 base_c=256, target_len=1301,
+                 activation='sigmoid'):
         super().__init__()
         self.target_len = target_len
 
@@ -437,10 +445,16 @@ class CondGen1D_Upsample_FiLM_Optimized(nn.Module):
         self.up3 = UpsampleBlock2FiLM(base_c // 4,  base_c // 8,  cond_dim)
         self.up4 = UpsampleBlock2FiLM(base_c // 8,  base_c // 16, cond_dim)
 
-        self.final = nn.Sequential(
-            nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3, bias=True),
-            nn.Tanh()
-        )
+        if activation == "tanh":
+            self.final = nn.Sequential(
+                nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3, bias=True),
+                nn.Tanh()
+            )
+        elif activation == "sigmoid":
+            self.final = nn.Sequential(
+                nn.Conv1d(base_c // 16, 1, kernel_size=7, padding=3, bias=True),
+                nn.Sigmoid()
+            )
 
     def forward(self, z, y1, y2):
         e1 = self.embed1(y1)

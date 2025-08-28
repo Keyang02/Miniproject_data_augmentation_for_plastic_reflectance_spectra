@@ -15,8 +15,8 @@ from loaddataset import Dataset_expand
 from material_dict import material_labels
 
 from conditional_WGAN_net import init_weights
-from conditional_WGAN_net import CondCritic1D_PD_Stable as CondCritic1D
-from conditional_WGAN_net import CondGen1D_Upsample_FiLM_Optimized as CondGen1D
+from conditional_WGAN_net import CondCritic1D_2labels as CondCritic1D
+from conditional_WGAN_net import CondGen1D_Upsample_2labels as CondGen1D
 from material_dict import material_labels, color_labels, noise_labels
 
 parser = argparse.ArgumentParser(description='Hyperparameters for Conditional WGAN-GP')

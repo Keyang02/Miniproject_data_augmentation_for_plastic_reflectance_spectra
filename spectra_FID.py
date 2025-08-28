@@ -24,10 +24,12 @@ parser = argparse.ArgumentParser(description='Spectral FID Calculation')
 parser.add_argument('--model_info', type=str, default='_k4_GP', help='information about the model')
 parser.add_argument('--islog', type=bool, default=False, help='whether to log the training process')
 parser.add_argument('--trainset', type=str, choices=['large', 'small'], default='large', help='which trainset to use')
+parser.add_argument('--selected_material', type=int, default=None, help='which material to use')
+
+if parser.parse_args().selected_material is not None:
+    material_labels = {parser.parse_args().selected_material: material_labels[parser.parse_args().selected_material]}
 
 log_path = f'log/spectral_fid_values{parser.parse_args().model_info}.md'
-
-
 
 if parser.parse_args().trainset == 'small':
     trainset_path = 'PlasticDataset/small_sets/filtered_all_materials.csv'
@@ -201,7 +203,7 @@ def fed_one_material(material: int):  # noqa: D401
 
     # ------------------------ Model -----------------------
     encoder = CondCritic1D_2labels(
-        embed_classes1=len(material_labels),
+        embed_classes1=11,
         embed_classes2=4,
         embed_dim1=16,
         embed_dim2=8,

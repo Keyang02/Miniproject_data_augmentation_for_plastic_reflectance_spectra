@@ -19,8 +19,6 @@ from conditional_WGAN_net import init_weights
 from conditional_WGAN_net import CondCritic1D_PD_Stable as CondCritic1D
 from conditional_WGAN_net import CondGen1D_Upsample_FiLM_Optimized as CondGen1D
 
-from intermediate_FID import main as fid_main
-
 material_labels = {
     2 : "PP"
 }
